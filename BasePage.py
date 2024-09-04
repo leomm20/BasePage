@@ -1,72 +1,105 @@
+from io import BytesIO
+from PIL import Image
 import os.path
 from datetime import datetime
 import time
+from typing import Optional
 from selenium.webdriver.common.alert import Alert
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.select import Select
 from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.service import Service as ChromeService  # ChromeService que se utiliza para iniciar el servicio de Chrome.
 from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import TimeoutException
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.remote.webdriver import WebDriver
 
 class BasePage(By):
-    # Contructor con su setup:
-    def __init__(self, driver_to_use='chrome' or 'firefox' or 'edge' or 'ie' or 'safari',
-                 wait=10, highlight=False, proxy='', load_timeout_site=120):
-
-        if driver_to_use.lower() == 'firefox':
-            firefox_options = webdriver.FirefoxOptions()
-            #firefox_options.add_argument("-private")
-            firefox_options.add_argument("-safe-mode") #Launches the application with extensions disabled and the default theme. 
-            if proxy != '':
-                firefox_options.add_argument('--proxy-server=%s' % proxy)  # configurará un proxy
-            self.driver = webdriver.Firefox(options=firefox_options, service=FirefoxService(executable_path=None))
-
-        #     self.driver.set_page_load_timeout(load_timeout_site)
-        # elif driver_to_use.lower() == 'edge':
-        #     edge_options = webdriver.EdgeOptions()
-        #     edge_options.use_chromium = True
-        #     self.driver = webdriver.Edge(options=edge_options,
-        #                                  service=EdgeService(EdgeChromiumDriverManager().install()))
-        #     self.driver.set_page_load_timeout(load_timeout_site)
-        # elif driver_to_use.lower() == 'ie':
-        #     self.driver = webdriver.Ie(service=IEService(IEDriverManager().install()))
-        # elif driver_to_use.lower() == 'safari':
-        #     # a partir de safari 10, no hace falta descargar el webdriver, pero sí hay que habilitar
-        #     # safari para poder automatizar (ejecutando: safaridriver --enable)
-        #     self.driver = webdriver.Safari()
-        #     self.driver.set_page_load_timeout(load_timeout_site)
+    
+    VALID_BROWSERS = {'chrome', 'firefox', 'edge'}
+    # Constructor
+    def __init__(self, 
+                 driver: Optional[WebDriver] = None,
+                 driver_to_use: str = 'chrome', 
+                 wait: int = 10, 
+                 highlight: bool = False, 
+                 proxy: str = '', 
+                 load_timeout_site: int = 120, 
+                 headless: bool = False, 
+                 ignore_cert_errors: bool = True):
+        
+        driver_to_use = driver_to_use.lower()
+        
+        if driver_to_use not in self.VALID_BROWSERS:
+            raise ValueError(f"Invalido 'driver_to_use': {driver_to_use}. solo se admite: {', '.join(self.VALID_BROWSERS)}.")
+        
+        if driver is None:
+            if driver_to_use == 'firefox':
+                firefox_options = webdriver.FirefoxOptions()
+                if headless:
+                    firefox_options.add_argument("--headless")
+                if proxy:
+                    firefox_options.add_argument(f'--proxy-server={proxy}')
+                if ignore_cert_errors:
+                    firefox_options.set_preference("network.stricttransportsecurity.preloadlist", False)
+                    firefox_options.set_preference("security.enterprise_roots.enabled", True)
+                    firefox_options.set_preference("webdriver_accept_untrusted_certs", True)
+                    firefox_options.set_preference("webdriver_assume_untrusted_issuer", False)
+                self.driver = webdriver.Firefox(options=firefox_options, service=FirefoxService())
+                
+            elif driver_to_use == 'edge':
+                edge_options = webdriver.EdgeOptions()
+                edge_options.add_argument("--start-maximized")
+                if headless:
+                    edge_options.add_argument("--headless")
+                if proxy:
+                    edge_options.add_argument(f'--proxy-server={proxy}')
+                if ignore_cert_errors:
+                    edge_options.add_argument('--ignore-certificate-errors')
+                self.driver = webdriver.Edge(options=edge_options, service=EdgeService())
+                
+            else:  # 'chrome' por defecto
+                chrome_options = webdriver.ChromeOptions()
+                chrome_options.add_experimental_option("detach", True)
+                chrome_options.add_argument("disable-logging")
+                chrome_options.add_argument('--allow-running-insecure-content')
+                chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                chrome_options.add_argument("--disable-extensions")
+                if headless:
+                    chrome_options.add_argument("--headless")
+                if proxy:
+                    chrome_options.add_argument(f'--proxy-server={proxy}')
+                if ignore_cert_errors:
+                    chrome_options.add_argument('--ignore-certificate-errors')
+                self.driver = webdriver.Chrome(options=chrome_options, service=ChromeService())
+                
         else:
-            # chrome_options: se utiliza para configurar el navegador Chrome.
-            chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_experimental_option("detach", True)
-            chrome_options.add_argument("disable-logging")  # ocultará las trazas de errores
-            chrome_options.add_argument('--ignore-certificate-errors')  # Ignorar errores de certificado
-            chrome_options.add_argument('--allow-running-insecure-content')  # Permitir contenido inseguro
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])  # para eliminar msg de USB
-            chrome_options.add_argument("--disable-extensions")  # para deshabilitar las extensiones del navegador Chrome
-            if proxy != '': chrome_options.add_argument('--proxy-server=%s' % proxy)  # configurará un proxy
-            self.driver = webdriver.Chrome(options=chrome_options, service=ChromeService(executable_path=None))
-
+            self.driver = driver
+        
         self.driver.set_page_load_timeout(load_timeout_site)
         self.wait = WebDriverWait(self.driver, wait)
-        self.actions = ActionChains(
-            self.driver)  # La clase ActionChains se utiliza para crear y ejecutar secuencias de acciones, como clics, movimientos del ratón y escritura.
+        self.actions = ActionChains(self.driver)
         self.highlight = highlight
         self.highlight_script = "arguments[0].style.border='10px ridge #d92356'"
 
+    # Obtiene el driver actual.
+    def get_driver_current(self):
+        return self.driver
+    
+    # Obtiene el titulo de la página actual.
     def get_title(self):
         return self.driver.title
 
     # Abre el sitio web o archivo html.
-    def navigate_to(self, url):
+    def navigate_to(self, url:str):
         try:
             self.driver.get(url)
+  
         except WebDriverException as e:
             print(f"Error al navegar a la URL: {url}. más detalle: {e}")
             # traceback.print_exc()  # Imprime el rastro de la pila
@@ -77,6 +110,7 @@ class BasePage(By):
         self.driver.stop_client()
         # quit() method quits the driver instance, closing every associated window, which is opened.
         self.driver.close()
+        self.driver.quit()
 
     # La funcion "find" devuelve un webElement en base al "locator" recibido.
     def find(self, locator: tuple) -> WebElement:
@@ -167,6 +201,7 @@ class BasePage(By):
         js_script = f"window.scrollBy(0,{pixels})"
         return self.driver.execute_script(js_script)
 
+
     # La función scroll_to_element se utiliza para desplazar la página web de
     # modo que un elemento específico identificado 
     # por un locator quede visible en la ventana del navegador.
@@ -189,12 +224,34 @@ class BasePage(By):
 
     # La función take_screenshot se utiliza para capturar una captura de pantalla de la página web actual en el
     # navegador y guardarla en un archivo con un título específico.
-    def take_screenshot(self, title):
+    def take_screenshot(self, title: str) -> str:
+        self.sleep(3)
         date = datetime.now().strftime('%Y%m%d_%H%M%S')
         if not os.path.exists(os.path.join(os.getcwd(), 'screenshots')):
             os.mkdir('screenshots')
-        self.driver.save_screenshot('screenshots/' + title + '_' + date + '.png')
-
+        save_path:str = 'screenshots/' + title + '_' + date + '.png'
+        if self.driver.save_screenshot(save_path) == True:
+             return save_path
+        else:
+             return None
+    
+    #  La funcion devuleve un array de bytes, es útil cuando se utiliza:
+    #  from pytest_html_reporter import attach
+    #  from PIL import Image
+    #  img = Image.open('D:/MisProyectos/Selenium/test/imagen.png')
+    #  attach(get_screenshot_from_file(img))
+    def get_screenshot_from_file(self,img: Image) -> bytes:
+        # Guarda la imagen en un objeto BytesIO en formato PNG
+        with BytesIO() as buffer:
+            img.save(buffer, format='PNG')
+            buffer.seek(0)
+            img_data = buffer.read()
+        return img_data
+        
+    def get_screenshot_as_png(self) -> bytes:
+        self.sleep(3)
+        return self.driver.get_screenshot_as_png()
+           
     # La función click_and_hold se utiliza para hacer clic y mantener presionado un
     # elemento web identificado por un localizador
     def click_and_hold(self, locator):
@@ -349,6 +406,10 @@ class BasePage(By):
     def delete_all_cookies(self):
         self.driver.delete_all_cookies()
 
+    # se utiliza para eliminar todas las cookies del navegador
+    def get_cookies(self):
+        self.driver.get_cookies()
+
     # Se utiliza para arrastrar y soltar un elemento web dentro de otro.
     def drag_and_drop(self, loc_source, loc_target):
         source_element = self.find(loc_source)
@@ -394,3 +455,62 @@ class BasePage(By):
     # visible en la página antes de realizar cualquier acción en él.
     def visibility_of_element_located(self, locator):
         return self.wait.until(ec.visibility_of_element_located(locator))
+    
+    #ejecuta script javascript (ej: "return window.localStorage.getItem('token')"")
+    def execute_script(self, script:str):
+        return self.driver.execute_script(script)
+    
+    # Devuelve el color de fondo del elemento web en formato hexadecimal.
+    # Si el color no está configurado, devuelve 'none'.       
+    def  get_color_of_element(self, locator) -> str:
+        element:WebElement = self.find(locator)
+        color:str = element.value_of_css_property('background-color')
+        
+        if color == 'rgba(0, 0, 0, 0)' or 'rgb(0, 0, 0)' or color == 'transparent':
+            return 'none'
+        
+        if color.startswith('#'):
+            return color
+        
+        return self.__rgb_to_hex(color)
+    
+    # Devuelve el color de fondo del elemento web en formato RGB.
+    # Si el color no está configurado, devuelve 'none'.
+    def get_color_of_element(self, locator) -> str:
+        element: WebElement = self.find(locator)
+        color: str = element.value_of_css_property('background-color')
+        
+        if color in ('rgba(0, 0, 0, 0)', 'rgb(0, 0, 0)', 'transparent'):
+            return 'none'
+        
+        if color.startswith('#'):
+            return color
+        
+        return self.__rgb_to_hex(color)
+
+    # Devuelve altura, ancho, coordenadas X e X del elemento
+    def get_size_coordinates(self, locator)->dict:
+        
+        elemente:WebElement = self.find(locator)
+        elemente.rect
+        
+    # Devuelve el tamaño del elemento
+    def get_size(self, locator)->dict:
+        
+        elemente:WebElement = self.find(locator)
+        return elemente.size
+    
+    # Método privado
+    def __rgb_to_hex(self, rgb: str) -> str:
+    #Convierte un valor RGB en formato 'rgb(r, g, b)' o 'rgba(r, g, b, a)' a hexadecimal.
+    # Elimina 'rgba(' o 'rgb(' y ')'
+        rgb = rgb.replace('rgba(', '').replace('rgb(', '').replace(')', '')
+        
+        # Divide los valores
+        values = list(map(int, rgb.split(', ')))
+        
+        # Si tiene 4 valores, es RGBA; si tiene 3, es RGB
+        r, g, b = values[:3]  # Ignorar el canal alfa si es RGBA
+
+        # Convertir a hexadecimal
+        return f'#{r:02X}{g:02X}{b:02X}'
